@@ -1,0 +1,40 @@
+apiVersion: serving.knative.dev/v1alpha1
+kind: Configuration
+metadata:
+  name: greeter
+spec:
+  build:
+    apiVersion: build.knative.dev/v1alpha1
+    kind: Build
+    metadata:
+      name: greeter
+    spec:
+      serviceAccountName: builder
+      source:
+        git:
+          url: https://github.com/workspace7/knative-serving-blogs
+          revision: master
+      template:
+        name: java-buildah
+        arguments:
+          - name: IMAGE_NAME
+            value: "greeter:0.0.1"
+          - name: CONTEXT_DIR
+            value: "part-2/java"
+          - name: JAVA_APP_NAME
+            value: "greeter.jar"
+          - name: CACHE
+            value: m2-cache
+      volumes:
+        - name: m2-cache
+          persistentVolumeClaim:
+            claimName: m2-cache
+  revisionTemplate:
+    metadata:
+      labels:
+        app: greeter
+    spec:
+      container:
+        # This should be a fully qualified domain name e.g. quay.io/example/myimage:mytag
+        # This is configured to use the inbuilt default docker registry
+        image: docker-registry.default.svc:5000/myproject/greeter:0.0.1
