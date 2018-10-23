@@ -15,20 +15,14 @@ spec:
           url: https://github.com/workspace7/knative-serving-blogs
           revision: master
       template:
-        name: java-buildah
+        name: node-buildah
         arguments:
           - name: IMAGE_NAME
             value: "greeter:0.0.1"
           - name: CONTEXT_DIR
-            value: "part-2/java"
-          - name: JAVA_APP_NAME
-            value: "greeter.jar"
-          - name: CACHE
-            value: m2-cache
-      volumes:
-        - name: m2-cache
-          persistentVolumeClaim:
-            claimName: m2-cache
+            value: "part-2/node"
+          - name: APP_MAIN
+            value: "app.js"
   revisionTemplate:
     metadata:
       labels:
