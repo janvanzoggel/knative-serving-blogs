@@ -1,65 +1,156 @@
 :experimental:
 
-= Route to your Revisioned Serverless Service
+= Build your Kubernetes Serverless Service
 
-The sample code in this section helps you to deploy serverless workload using https://github.com/knative/docs/tree/master/serving[Knative-Serving] following configuration and route workflow.  The code also shows how to distribute the traffic across multiple revisions of a serverless workload.
+The sample code in this section helps you to deploy serverless workload using https://github.com/knative/docs/tree/master/serving[Knative-Serving] following source to container strategy. 
 
-This repo folder has sources for Java and Node.
+This demo shows how to build the container using  https://buildah.io[buildah]
+
+== Pre-requisite
+
+- https://github.com/knative/docs/blob/master/build/installing-build-component.md[Knative Build] is installed
+- Basic knowledge of how to build container images with https://buildah.io[buildah]
+
+=== User namespaces
+By default RHEL/Centos sets the max_user_namespaces value to **0**, you need to set that to bigger value to make the buildah container builds to pass, set the `max_user_namespaces` kernel parameter to 15000. For more details on user namespaces refer to http://man7.org/linux/man-pages/man7/user_namespaces.7.html
+
+[source,bash]
+----
+minishift ssh
+sudo -i 
+echo 15000 > /proc/sys/user/max_user_namespaces <1>
+sysctl user.max_user_namespaces=15000  && sysctl -p <2>
+----
+<1> does apply the value temporarily 
+<2> save the value permanently surviving reboots
+
+=== Skipping tag to digest
+The Knative-serving is by default skips tag to digest for the registries `ko.local` and `dev.local`, as part of this demo you will push the build image to internal default docker registry (__docker-registry.default.svc:5000__) , you will need update `registriesSkippingTagResolving` attribute of the config-controller ConfigMap to include the registry **docker-registry.default.svc:5000** to be skipped for tag to digest resolving.
+
+[source,bash]
+----
+val=$(oc -n knative-serving get cm config-controller -oyaml | yq r - data.registriesSkippingTagResolving | awk '{print $1",docker-registry.default.svc:5000"}')
+oc -n knative-serving get cm config-controller -oyaml | yq w - data.registriesSkippingTagResolving $val | oc apply -f -  
+----
 
 == Building and Deploying Application
 
 The source folder **part-2** will be referred as `$PROJECT_HOME`. The following section details on how to build either Java or Node Application.
 
+[TIP]
+====
+Time out is configurable as well, for this demo sake let us change the scale-to-zero-threshold from 5m to 30s and the scale-to-zero-grace-period from 2m to 1m.
+
+[source,bash]
+----
+oc -n knative-serving get cm config-autoscaler -o yaml | yq w -  data.scale-to-zero-threshold 30s | kubectl apply -f -
+oc -n knative-serving get cm config-autoscaler -o yaml | yq w -  data.scale-to-zero-grace-period 1m | kubectl apply -f -
+----
+
+====
+
 === Building 
 
-The application uses Knative-build
-
-=== Java
+The application uses Knative-build to build the application.
 
 [source,bash]
 ----
-cd $PROJECT_HOME/java
-./mvnw jib:dockerBuild # <1>
+cd $PROJECT_HOME/build
 ----
-<1> this should build a image like `dev.local/greeter:0.0.1`
 
-=== Node
+==== Apply Build Template
+
+===== Java
 
 [source,bash]
 ----
-cd $PROJECT_HOME/node
-
-docker build -t dev.local/greeter:0.0.1 --rm . # <1>
+oc apply -f m2-pvc.yaml # #<1>
+oc apply -f templates/java-buildah-template.yaml
 ----
-<1> this should build a image like `dev.local/greeter:0.0.1`
+<1> A persistence volume is configured to store .m2 repository and o make the subsequent maven builds faster.
 
-=== Deploying Service
+===== Node
 
-==== Revision 1
+[source,bash]
+----
+oc apply -f templates/node-buildah-template.yaml
+----
+
+=== Deploying Revision 1
 
 [source,bash]
 ----
 cd $PROJECT_HOME
-oc apply -f config/configuration_rev1.yaml
+----
+===== Java
+[source,bash]
+----
+oc apply -f config/java/configuration_rev1.yaml
+----
+
+===== Node
+[source,bash]
+----
+oc apply -f config/java/configuration_rev2.yaml
+----
+
+You can watch the status of services via `oc get pods -w`, once the pods are running you can invoke the services as shown below.
+
+=== Deploying Route
+
+[source,bash]
+----
 oc apply -f route/route_default.yaml
 ----
 
-Update the environment variable `MESSAGE_PREFIX` in link:./config/configuration_rev2.yaml[configuration_rev2.yaml]
+Now invoking the service using the command `$PROJECT_HOME/bin/call.sh`, should return an response like **Java Knative on OpenShift** , if you deployed NodeJS service then you should get response like **NodeJs Knative on OpenShift**
 
-==== Revision 2
-
-[source,bash]
-----
-cd $PROJECT_HOME
-oc apply -f config/configuration_rev2.yaml
-----
-
-=== Invoking Service
+=== Deploying Revision 2
 
 [source,bash]
 ----
 cd $PROJECT_HOME
-bin/call.sh
+----
+===== Java
+[source,bash]
+----
+oc apply -f config/java/configuration_rev2.yaml
+----
+
+===== Node
+[source,bash]
+----
+oc apply -f config/java/configuration_rev2.yaml
+----
+
+You can watch the status of services via `oc get pods -w`, once the pods are running you can invoke the services as shown below.
+
+Now invoking the service using the command `$PROJECT_HOME/bin/call.sh`, should return an response like **Hi  Knative on OpenShift** 
+
+=== Traffic Distribution
+
+There are multiple example routes available in `$PROJECT_HOME/route` for this example we will deploy a route that will distribute 90% of traffic to Revision 1 and 10% to Revision 2
+
+[source,bash]
+----
+cd $PROJECT_HOME
+oc apply -f route/route_rev1-90_rev2-10.yaml
+----
+
+You can watch the status of services via `oc get pods -w`, once the pods are running you can invoke the services as shown below.
+
+Now invoking the service using the command `$PROJECT_HOME/bin/call.sh`, you should get a mixed responses of   **Java Knative on OpenShift** or  **NodeJs Knative on OpenShift** and  **Hi  Knative on OpenShift**.  If you leave the script running for sometime you will notice there will be more traffic to Revision 1 than Revision 2.
+
+== Clean up
+
+Clean up all the resources created as part of this demo,
+
+[source,bash]
+----
+oc delete services.serving.knative.dev --all
+oc delete configurations.serving.knative.dev --all
+oc delete buildtemplate.build.knative.dev --all
+oc delete is greeter
 ----
 
 == Useful commands
@@ -70,6 +161,8 @@ The following are some useful commands
 - Get all **Knative configurations** on project **myproject** `kubectl -nmyproject get configuration.serving.knative.dev`
 - Get all **Knative routes** on project **myproject** `kubectl -nmyproject get route.serving.knative.dev`
 - Get all **Knative revisions** on project **myproject** `kubectl -nmyproject get revision.serving.knative.dev`
+- Get all **Knative builds** on project **myproject** `kubectl -nmyproject get builds.build.knative.dev`
+- Get all **Knative build templates** on project **myproject** `kubectl -nmyproject get buildtemplates.build.knative.dev`
 
 [TIP]
 ====
