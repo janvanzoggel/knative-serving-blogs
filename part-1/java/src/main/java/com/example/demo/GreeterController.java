@@ -10,11 +10,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class GreeterController {
 
-    @Value("${MESSAGE_PREFIX}")
+    @Value("${MESSAGE_PREFIX:Java::}")
     private String prefix;
 
     @GetMapping("/")
     public String greet() {
-        return prefix + "Java::Knative on OpenShift";
+        return prefix + " Knative on OpenShift";
     }
 }
